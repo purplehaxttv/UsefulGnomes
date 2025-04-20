@@ -1,0 +1,10 @@
+{
+  "name": "UsefulGnomes",
+  "version_number": "1.0.0",
+  "website_url": "https://github.com/purplehaxttv/UsefulGnomes", 
+  "description": "Version 1: Idles those pesky gnomes. Further versions will make them actually useful.",
+  "dependencies": [
+  "BepInEx-BepInExPack-5.4.2100"
+],
+"type":"mod"
+}
