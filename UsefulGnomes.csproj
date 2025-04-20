@@ -73,6 +73,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="obj\Debug\DesignTimeResolveAssemblyReferencesInput.cache" />
+    <None Include="README.md" />
   </ItemGroup>
   <ItemGroup>
     <Content Include=".gitignore" />
