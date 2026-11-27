@@ -1,53 +1,71 @@
-# ?? Useful Gnomes – A R.E.P.O. Mod
+# Useful Gnomes
 
-**Useful Gnomes** is a mod for the game [R.E.P.O.](https://store.steampowered.com/app/2532120/REPO/) that reworks gnome enemy behavior into something... well, a little more helpful.
+A mod for [R.E.P.O.](https://store.steampowered.com/app/3241660/REPO/) that turns the gnomes from a nuisance into helpers. They no longer attack, and they fetch valuables and carry them to you.
 
-## ?? What It Does
+## What it does
 
-In **v1**, gnomes will still spawn and wander around — but they no longer engage in combat. Think of them as *ambient chaos with no bite*. This is a foundation mod for bigger behavior shifts coming soon.
+- **Gnomes are passive.** They never notice, chase or attack players or valuables.
+- **Gnomes fetch.** An idle gnome picks the nearest valuable, walks to it, lifts it over its head and carries it to the closest living player, then sets it down at their feet.
+- **Carried valuables are safe.** A valuable cannot break while a gnome is holding it, and you can take it straight out of a gnome's hands.
+- **They stay out of your way.** Gnomes leave alone anything that is in a cart, in the truck, in an extraction point, held by a player, or already close to a player.
 
-## ?? Features
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> ToItem: valuable in range
+    ToItem --> Carry: reached the valuable
+    ToItem --> Idle: could not reach it in 30 s
+    Carry --> SetDown: next to the closest player
+    Carry --> Idle: a player took the valuable
+    SetDown --> Idle: delivered
+```
 
-- Prevents gnome AI from entering aggressive or attack states
-- Keeps pathing and roaming intact
-- Logs spawn positions for debugging (or gnome-tracking purposes)
-- Lightweight, patch-only implementation (no asset changes... yet)
+## Which valuables get fetched
 
-## ?? Roadmap
+A gnome only goes for a valuable when all of these are true:
 
-| Version | Feature |
-|---------|---------|
-| **v1** | All gnomes are passive and cannot attack |
-| **v2** | Hostile gnomes are reintroduced with color differences (friendly vs. enemy) |
-| **v3** | Friendly gnomes guide you toward nearby loot |
+| Rule | Default |
+| --- | --- |
+| Within fetch range of the gnome | 30 m |
+| No bigger than the largest allowed size | Medium |
+| Not within the keep-away distance of any player | 4 m |
+| Not in a cart, the truck or an extraction point | always |
+| Not held by a player, and not already delivered this level | always |
+| Close to a walkable spot | always |
 
-## ?? Installation
+A valuable a gnome could not reach is skipped for a minute and then tried again.
 
-### ?? Thunderstore
+## Settings
 
-1. Search for **Useful Gnomes** in the [Thunderstore Mod Manager](https://www.overwolf.com/app/thunderstore-thunderstore-mod-manager)
-2. Install and launch with BepInEx
+Change these in the in-game mod settings (with REPOConfig installed) or in `BepInEx/config/com.purplehax.usefulgnomes.cfg`.
 
-### ?? Manual
+| Section | Setting | Default | What it does |
+| --- | --- | --- | --- |
+| Fetch | Gnomes fetch valuables | true | Turn fetching off to keep gnomes passive only |
+| Fetch | Fetch range | 30 | How far a gnome looks for something to fetch, in metres |
+| Fetch | Largest valuable | Medium | The biggest size of valuable a gnome will carry |
+| Fetch | Gnome speed | 3 | How fast a gnome moves while fetching |
+| Fetch | Leave alone near players | 4 | Valuables this close to a player are left where they are |
+| Debug | Verbose log | false | Log every pick up and delivery |
 
-1. Download the latest `.dll` from the [Releases](https://github.com/yourusername/UsefulGnomes/releases) page
-2. Drop it into your game’s `BepInEx/plugins` folder
+## Multiplayer
 
-## ?? Contributing
+The host runs the gnomes, and the host's settings apply. Carried valuables are moved by the host and synced to everyone the same way any other moving valuable is.
 
-Feel free to fork and contribute — especially if you have ideas for gnome utility behaviors. Color handling and loot targeting will be the focus of `v2` and `v3`.
+## Install
 
-## ?? Author
+Install **UsefulGnomes** with a Thunderstore mod manager, or copy `UsefulGnomes.dll` into `BepInEx/plugins`.
 
-Made with ? by [@purplehaxttv](https://twitch.tv/purplehaxttv)  
-Mod inspired by chaotic energy and a need for gnome-based enrichment.
+## Build
 
----
+The project builds against the game's own assemblies, so it needs R.E.P.O. and a BepInEx install on the machine.
 
-### ?? License
+```
+dotnet build UsefulGnomes.csproj -c Release -p:GameDir="<path to REPO>" -p:BepInExDir="<path to BepInEx>"
+```
 
-MIT – feel free to tinker, just don't make the gnomes evil again.
+`Dev/` holds a test harness that is not shipped. It starts a solo run, spawns gnomes next to the player and logs what they deliver.
 
----
+## License
 
-> “They used to bite. Now they guide.” – Some random patch note probably
+MIT
