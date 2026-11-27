@@ -1,11 +1,15 @@
-# Build artifacts
-bin/*
-obj/*
+# Build output
+bin/
+obj/
 *.dll
 *.pdb
 *.zip
 
-# User/IDE files
-.vs/*
+# IDE
+.vs/
+.idea/
 *.user
 *.suo
+
+# Local tooling
+.claude/
