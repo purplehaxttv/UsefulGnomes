@@ -35,6 +35,7 @@ Change these in the in-game mod settings (with REPOConfig installed) or in `BepI
 | Fetch | Largest valuable | Medium | The biggest size of valuable a gnome will carry |
 | Fetch | Gnome speed | 3 | How fast a gnome moves while fetching |
 | Fetch | Leave alone near players | 4 | Valuables this close to a player are left where they are |
+| Gnomes | Sturdy gnomes | true | Gnomes are not hurt by being picked up, dropped or bumped by loot, and loot is not damaged by bumping into them. Weapons still hurt them |
 | Debug | Verbose log | false | Log every pick up and delivery |
 
 ## Multiplayer
