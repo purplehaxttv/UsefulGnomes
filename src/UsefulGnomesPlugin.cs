@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace UsefulGnomes
 {
-    [BepInPlugin("com.purplehax.usefulgnomes", "Useful Gnomes", "2.0.0")]
+    [BepInPlugin("com.purplehax.usefulgnomes", "Useful Gnomes", "2.0.1")]
     public class UsefulGnomesPlugin : BaseUnityPlugin
     {
         internal static ManualLogSource Logger;
@@ -17,6 +17,7 @@ namespace UsefulGnomes
         internal static ConfigEntry<ValuableVolume.Type> MaxSize;
         internal static ConfigEntry<float> CarrySpeed;
         internal static ConfigEntry<float> IgnoreNearPlayer;
+        internal static ConfigEntry<bool> SturdyGnomes;
         internal static ConfigEntry<bool> Verbose;
 
         private void Awake()
@@ -35,6 +36,8 @@ namespace UsefulGnomes
                 new ConfigDescription("How fast a gnome moves while fetching.", new AcceptableValueRange<float>(1f, 8f)));
             IgnoreNearPlayer = Config.Bind("Fetch", "Leave alone near players", 4f,
                 new ConfigDescription("Valuables this close to a player are left where they are, in metres.", new AcceptableValueRange<float>(1f, 20f)));
+            SturdyGnomes = Config.Bind("Gnomes", "Sturdy gnomes", true,
+                "Gnomes are not hurt by being picked up, dropped or bumped by loot, and loot is not damaged by bumping into them. Weapons still hurt them.");
             Verbose = Config.Bind("Debug", "Verbose log", false, "Log every pick up and delivery.");
 
             new Harmony("com.purplehax.usefulgnomes").PatchAll();

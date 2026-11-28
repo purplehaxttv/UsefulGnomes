@@ -18,8 +18,15 @@ namespace UsefulGnomes
             public PlayerAvatar Player;
             public float NextPlayerPick;
             public Vector3 ItemNavPoint;
-            public List<Collider> GnomeColliders;
-            public List<Collider> ItemColliders;
+            public Vector3 SetDownSpot;
+        }
+
+        // An item a gnome has let go of. It keeps passing through other loot until nothing overlaps it,
+        // so it is never shoved out of another object.
+        sealed class Settling
+        {
+            public PhysGrabObject Item;
+            public float Until;
         }
 
         const float AssignInterval = 1f;
@@ -29,6 +36,8 @@ namespace UsefulGnomes
         const float ToItemTimeout = 30f;
         const float CarryTimeout = 90f;
         const float SetDownTime = 0.7f;
+        const float SetDownTimeout = 2.5f;
+        const float SettleSeconds = 6f;
         const float SkipSeconds = 60f;
 
         static readonly Dictionary<EnemyGnome, Job> jobs = new Dictionary<EnemyGnome, Job>();
@@ -37,6 +46,9 @@ namespace UsefulGnomes
         static readonly Dictionary<PhysGrabObject, float> skipUntil = new Dictionary<PhysGrabObject, float>();
         static readonly Dictionary<EnemyGnome, float> restUntil = new Dictionary<EnemyGnome, float>();
         static readonly List<EnemyGnome> finished = new List<EnemyGnome>();
+        static readonly Dictionary<PhysGrabObject, List<KeyValuePair<Collider, LayerMask>>> passing = new Dictionary<PhysGrabObject, List<KeyValuePair<Collider, LayerMask>>>();
+        static readonly List<Settling> settling = new List<Settling>();
+        static readonly Collider[] overlaps = new Collider[32];
         static ValuableObject[] valuables = new ValuableObject[0];
         static PhysGrabCart[] carts = new PhysGrabCart[0];
         static float nextAssign;
@@ -48,6 +60,9 @@ namespace UsefulGnomes
         {
             foreach (Job job in jobs.Values) Release(job);
             jobs.Clear();
+            foreach (PhysGrabObject item in new List<PhysGrabObject>(passing.Keys)) PassThrough(item, false);
+            passing.Clear();
+            settling.Clear();
             claimed.Clear();
             delivered.Clear();
             skipUntil.Clear();
@@ -67,11 +82,12 @@ namespace UsefulGnomes
         {
             if (!Active())
             {
-                if (jobs.Count > 0 || delivered.Count > 0) Reset();
+                if (jobs.Count > 0 || delivered.Count > 0 || passing.Count > 0) Reset();
                 return;
             }
 
             float now = Time.time;
+            Settle(now);
             if (now >= nextItemScan)
             {
                 nextItemScan = now + ItemScanInterval;
@@ -93,6 +109,7 @@ namespace UsefulGnomes
 
             if (now < nextAssign) return;
             nextAssign = now + AssignInterval;
+            if (UsefulGnomesPlugin.SturdyGnomes.Value) MakeSturdy();
             foreach (EnemyGnome gnome in EnemyGnomeDirector.instance.gnomes)
             {
                 if (!Available(gnome, now)) continue;
@@ -195,7 +212,8 @@ namespace UsefulGnomes
                 {
                     job.Phase = Phase.Carry;
                     job.PhaseTime = 0f;
-                    IgnoreCollisions(job, true);
+                    IgnoreGnomes(item);
+                    PassThrough(item, true);
                     Say($"{Name(gnome)} picked up {item.name}");
                     return true;
                 }
@@ -223,6 +241,7 @@ namespace UsefulGnomes
                 {
                     job.Phase = Phase.SetDown;
                     job.PhaseTime = 0f;
+                    job.SetDownSpot = PickSetDownSpot(job, body);
                     return true;
                 }
                 if (job.PhaseTime > CarryTimeout)
@@ -236,6 +255,7 @@ namespace UsefulGnomes
 
             gnome.enemy.NavMeshAgent.ResetPath();
             if (job.PhaseTime < SetDownTime) return true;
+            if (job.PhaseTime < SetDownTimeout && Vector3.Distance(item.centerPoint, job.SetDownSpot) > 0.25f) return true;
             delivered.Add(item);
             Say($"{Name(gnome)} delivered {item.name}, {(job.Player ? Vector3.Distance(item.centerPoint, job.Player.transform.position) : 0f):F1}m from the player");
             return false;
@@ -257,23 +277,133 @@ namespace UsefulGnomes
             Transform body = job.Gnome.enemy.Rigidbody.transform;
             float halfHeight = Mathf.Max(item.boundingBox.y, 0.1f) * 0.5f;
 
-            Vector3 hold;
-            if (job.Phase == Phase.Carry)
-            {
-                hold = body.position + Vector3.up * (0.55f + halfHeight);
-            }
-            else
-            {
-                Vector3 forward = job.Player ? job.Player.transform.position - body.position : body.forward;
-                forward.y = 0f;
-                hold = body.position + forward.normalized * 0.6f + Vector3.up * (halfHeight + 0.05f);
-            }
+            bool carrying = job.Phase == Phase.Carry;
+            Vector3 hold = carrying ? body.position + Vector3.up * (0.55f + halfHeight) : job.SetDownSpot;
 
             item.OverrideZeroGravity(0.2f);
             item.OverrideIndestructible(1.5f);
-            Vector3 velocity = (hold - item.centerPoint) * 12f;
-            rb.linearVelocity = Vector3.ClampMagnitude(velocity, 10f);
+            // Follow the gnome closely while it walks, but come down slowly when being set down.
+            Vector3 velocity = (hold - item.centerPoint) * (carrying ? 12f : 5f);
+            rb.linearVelocity = Vector3.ClampMagnitude(velocity, carrying ? 10f : 2.5f);
             rb.angularVelocity *= 0.8f;
+        }
+
+        // A free place on the floor in front of the gnome, or the nearest free place around it.
+        static Vector3 PickSetDownSpot(Job job, Vector3 body)
+        {
+            PhysGrabObject item = job.Item;
+            float halfHeight = Mathf.Max(item.boundingBox.y, 0.1f) * 0.5f;
+            float radius = Mathf.Max(item.boundingBox.x, item.boundingBox.z, 0.2f) * 0.5f + 0.05f;
+            Vector3 forward = job.Player ? job.Player.transform.position - body : job.Gnome.enemy.Rigidbody.transform.forward;
+            forward.y = 0f;
+            forward = forward.sqrMagnitude > 0.001f ? forward.normalized : Vector3.forward;
+            Vector3 lift = Vector3.up * (halfHeight + 0.05f);
+
+            Vector3 first = body + forward * 0.6f + lift;
+            if (Clear(item, first, radius)) return first;
+            for (int ring = 1; ring <= 3; ring++)
+            {
+                for (int step = 0; step < 8; step++)
+                {
+                    // alternate left and right of the direction to the player
+                    float angle = (step / 2 + 1) * 45f * (step % 2 == 0 ? 1f : -1f);
+                    Vector3 spot = body + Quaternion.Euler(0f, angle, 0f) * forward * (0.6f + ring * 0.5f) + lift;
+                    if (job.Player && Vector3.Distance(spot, job.Player.transform.position) < 0.8f) continue;
+                    if (Clear(item, spot, radius)) return spot;
+                }
+            }
+            return first;
+        }
+
+        // True when no other loose object occupies the space around a point.
+        static bool Clear(PhysGrabObject item, Vector3 point, float radius)
+        {
+            int count = Physics.OverlapSphereNonAlloc(point, radius, overlaps, SemiFunc.LayerMaskGetPhysGrabObject(), QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < count; i++)
+            {
+                PhysGrabObject other = overlaps[i].GetComponentInParent<PhysGrabObject>();
+                if (!other || other == item) continue;
+                if (other.GetComponent<EnemyRigidbody>()) continue;
+                return false;
+            }
+            return true;
+        }
+
+        // While carried, an item passes through other loose objects so it cannot knock them about.
+        static void PassThrough(PhysGrabObject item, bool on)
+        {
+            if (!item) return;
+            if (on)
+            {
+                if (passing.ContainsKey(item)) return;
+                var saved = new List<KeyValuePair<Collider, LayerMask>>();
+                LayerMask loose = SemiFunc.LayerMaskGetPhysGrabObject();
+                foreach (Collider collider in item.GetComponentsInChildren<Collider>())
+                {
+                    saved.Add(new KeyValuePair<Collider, LayerMask>(collider, collider.excludeLayers));
+                    collider.excludeLayers |= loose;
+                }
+                passing[item] = saved;
+                return;
+            }
+            if (!passing.TryGetValue(item, out List<KeyValuePair<Collider, LayerMask>> list)) return;
+            foreach (KeyValuePair<Collider, LayerMask> pair in list)
+            {
+                if (pair.Key) pair.Key.excludeLayers = pair.Value;
+            }
+            passing.Remove(item);
+        }
+
+        static void Settle(float now)
+        {
+            for (int i = settling.Count - 1; i >= 0; i--)
+            {
+                Settling s = settling[i];
+                if (s.Item && claimed.Contains(s.Item))
+                {
+                    settling.RemoveAt(i);
+                    continue;
+                }
+                if (s.Item && s.Item.isActiveAndEnabled && now < s.Until)
+                {
+                    s.Item.OverrideIndestructible(0.5f);
+                    float radius = Mathf.Max(s.Item.boundingBox.x, s.Item.boundingBox.y, s.Item.boundingBox.z, 0.2f) * 0.5f;
+                    if (!Clear(s.Item, s.Item.centerPoint, radius)) continue;
+                }
+                if (s.Item) PassThrough(s.Item, false);
+                settling.RemoveAt(i);
+            }
+        }
+
+        // Gnomes never collide with something a gnome has fetched, so they cannot kick the pile about
+        // and nothing in it can land on them.
+        static void IgnoreGnomes(PhysGrabObject item)
+        {
+            Collider[] itemColliders = item.GetComponentsInChildren<Collider>();
+            foreach (EnemyGnome gnome in EnemyGnomeDirector.instance.gnomes)
+            {
+                if (!gnome || !gnome.enemy || !gnome.enemy.EnemyParent) continue;
+                foreach (Collider a in gnome.enemy.EnemyParent.GetComponentsInChildren<Collider>(true))
+                {
+                    if (!a) continue;
+                    foreach (Collider b in itemColliders)
+                    {
+                        if (b) Physics.IgnoreCollision(a, b, true);
+                    }
+                }
+            }
+        }
+
+        // Friendly gnomes are not hurt by being carried, dropped or bumped by loot (which would also
+        // damage the loot). Weapons still work on them.
+        static void MakeSturdy()
+        {
+            foreach (EnemyGnome gnome in EnemyGnomeDirector.instance.gnomes)
+            {
+                if (!gnome || !gnome.enemy || !gnome.enemy.HasHealth || !gnome.enemy.Health) continue;
+                gnome.enemy.Health.impactHurt = false;
+                gnome.enemy.Health.objectHurt = false;
+            }
         }
 
         static void Release(Job job)
@@ -289,32 +419,8 @@ namespace UsefulGnomes
                         job.Item.rb.linearVelocity = Vector3.zero;
                         job.Item.rb.angularVelocity = Vector3.zero;
                     }
+                    settling.Add(new Settling { Item = job.Item, Until = Time.time + SettleSeconds });
                 }
-            }
-            IgnoreCollisions(job, false);
-        }
-
-        static void IgnoreCollisions(Job job, bool ignore)
-        {
-            if (ignore)
-            {
-                if (!job.Gnome || !job.Item) return;
-                job.GnomeColliders = new List<Collider>(job.Gnome.enemy.EnemyParent.GetComponentsInChildren<Collider>());
-                job.ItemColliders = new List<Collider>(job.Item.GetComponentsInChildren<Collider>());
-            }
-            if (job.GnomeColliders == null || job.ItemColliders == null) return;
-            foreach (Collider a in job.GnomeColliders)
-            {
-                if (!a) continue;
-                foreach (Collider b in job.ItemColliders)
-                {
-                    if (b) Physics.IgnoreCollision(a, b, ignore);
-                }
-            }
-            if (!ignore)
-            {
-                job.GnomeColliders = null;
-                job.ItemColliders = null;
             }
         }
 
